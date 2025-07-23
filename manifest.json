@@ -1,0 +1,9 @@
+{
+  "id": "tag-page-creator",
+  "name": "Tag Page Creator",
+  "version": "1.0.0",
+  "minAppVersion": "1.9.0",
+  "description": "Creates a note for each tag in the vault with special YAML and content, only if the page doesn't exist.",
+  "author": "Armin Pfarr",
+  "isDesktopOnly": false
+}
