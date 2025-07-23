@@ -3,40 +3,33 @@ name: Build and Release Obsidian Plugin
 on:
   push:
     tags:
-      - 'v*.*.*'   # Triggers on version tags like v1.0.0
+      - '*'
 
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v3
         with:
-          node-version: '18'
-
-      - name: Install dependencies
-        run: npm install
+          node-version: '18.x'
 
       - name: Build plugin
-        run: npm run build
-
-      - name: Archive plugin files
         run: |
-          mkdir plugin-dist
-          cp main.js manifest.json README.md plugin-dist/
-          if [ -f styles.css ]; then cp styles.css plugin-dist/; fi
+          npm install --legacy-peer-deps
+          npm run build
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            plugin-dist/main.js
-            plugin-dist/manifest.json
-            plugin-dist/README.md
-            plugin-dist/styles.css
+      - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+
+          gh release create "$tag" \
+            --title="$tag" \
+            --draft \
+            main.js manifest.json styles.css
