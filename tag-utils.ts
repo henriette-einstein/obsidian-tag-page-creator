@@ -67,7 +67,7 @@ export function getSegmentNormalizedTagMap(tagGroup: string[]): Map<string, stri
 }
 
 export function addSegmentsToSet(set: Set<string>, str: string) {
-    const parts = str.toLowerCase().split('/');
+    const parts = str.split('/');
     for (let i = 1; i <= parts.length; i++) {
         set.add(parts.slice(0, i).join('/'));
     }
@@ -94,7 +94,7 @@ export async function getAllTags(app: App): Promise<string[]> {
             const yamlTags = cache.frontmatter.tags;
             if (Array.isArray(yamlTags)) {
                 yamlTags.forEach(tag => {
-                    if (typeof tag === "string") tagSet.add(tag.replace(/^#/, ""));
+                    if (typeof tag === "string") addSegmentsToSet(tagSet, tag.replace(/^#/, ""));
                 });
             } else if (typeof yamlTags === "string") {
                 yamlTags.split(/[, ]/).forEach(tag => {

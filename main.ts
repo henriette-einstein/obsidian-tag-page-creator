@@ -42,7 +42,7 @@ export default class TagPageCreatorPlugin extends Plugin {
 
         for (const tag of tags) {
             const cleanedTag = tag.replace(/\//g, '-');
-            const fileName = `${dir}/Tag_${cleanedTag}.md`;
+            const fileName = `${dir}/Tag ${cleanedTag}.md`;
             const file = this.app.vault.getAbstractFileByPath(fileName);
             if (!file) {
                 const content = this.buildContent(tag);
