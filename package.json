@@ -1,6 +1,6 @@
 {
   "name": "obsidian-tag-page-creator",
-  "version": "1.0.0",
+  "version": "0.9.4",
   "description": "Creates a note for each tag in the vault with special YAML and content.",
   "main": "main.js",
   "scripts": {
