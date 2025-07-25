@@ -1,8 +1,22 @@
 import { App } from "obsidian";
 
+// Helper to extract tags from frontmatter (array or string)
+function extractYamlTags(tags: string[] | string | undefined): string[] {
+    if (!tags) return [];
+    if (Array.isArray(tags)) return tags.filter(t => typeof t === "string");
+    return tags.split(/[, ]/).map(t => t.trim()).filter(Boolean);
+}
+
+// Adds all hierarchical segments to a set
+export function addSegmentsToSet(set: Set<string>, str: string) {
+    const parts = str.split('/');
+    for (let i = 1; i <= parts.length; i++) {
+        set.add(parts.slice(0, i).join('/'));
+    }
+}
+
 export async function getCaseSensitiveDuplicateTags(app: App): Promise<string[][]> {
     const tagMap: Map<string, Set<string>> = new Map();
-
     const markdownFiles = app.vault.getMarkdownFiles();
 
     for (const file of markdownFiles) {
@@ -11,7 +25,7 @@ export async function getCaseSensitiveDuplicateTags(app: App): Promise<string[][
         // Inline tags
         if (cache?.tags) {
             for (const tagObj of cache.tags) {
-                const tag = tagObj.tag;
+                const tag = tagObj.tag.startsWith("#") ? tagObj.tag : "#" + tagObj.tag;
                 const lower = tag.toLowerCase();
                 if (!tagMap.has(lower)) tagMap.set(lower, new Set());
                 tagMap.get(lower)!.add(tag);
@@ -19,60 +33,35 @@ export async function getCaseSensitiveDuplicateTags(app: App): Promise<string[][
         }
 
         // YAML frontmatter tags
-        const frontmatter = cache?.frontmatter;
-        if (frontmatter && frontmatter.tags) {
-            const addTag = (tag: string) => {
+        if (cache?.frontmatter) {
+            extractYamlTags(cache.frontmatter.tags).forEach(tag => {
                 const tagNorm = tag.startsWith("#") ? tag : "#" + tag;
                 const lower = tagNorm.toLowerCase();
                 if (!tagMap.has(lower)) tagMap.set(lower, new Set());
                 tagMap.get(lower)!.add(tagNorm);
-            };
-
-            if (Array.isArray(frontmatter.tags)) {
-                for (const tag of frontmatter.tags) {
-                    if (typeof tag === "string") addTag(tag);
-                }
-            } else if (typeof frontmatter.tags === "string") {
-                for (const tag of frontmatter.tags.split(/[, ]/)) {
-                    if (tag) addTag(tag);
-                }
-            }
+            });
         }
     }
 
-    // Only entries with more than one variant (case difference)
-    const duplicates: string[][] = [];
-    for (const variants of tagMap.values()) {
-        if (variants.size > 1) {
-            duplicates.push(Array.from(variants));
-        }
-    }
-    return duplicates;
+    // Only entries with more than one case variant
+    return Array.from(tagMap.values()).filter(variants => variants.size > 1).map(variants => Array.from(variants));
 }
 
 export function getSegmentNormalizedTagMap(tagGroup: string[]): Map<string, string> {
     const segmentsList = tagGroup.map(tag => tag.split("/"));
-    const canonicalSegments = segmentsList[0].map((seg, idx) => {
+    const canonicalSegments = segmentsList[0].map((_, idx) => {
         const variants = segmentsList.map(segs => segs[idx]);
         const lower = variants.find(v => v === v.toLowerCase());
         return lower ?? variants[0].toLowerCase();
     });
 
     const map = new Map<string, string>();
-    for (const segments of segmentsList) {
+    segmentsList.forEach(segments => {
         const normalized = segments.map((seg, idx) => canonicalSegments[idx]).join("/");
         map.set(segments.join("/"), normalized);
-    }
+    });
     return map;
 }
-
-export function addSegmentsToSet(set: Set<string>, str: string) {
-    const parts = str.split('/');
-    for (let i = 1; i <= parts.length; i++) {
-        set.add(parts.slice(0, i).join('/'));
-    }
-}
-
 
 export async function getAllTags(app: App): Promise<string[]> {
     const tagSet = new Set<string>();
@@ -81,27 +70,19 @@ export async function getAllTags(app: App): Promise<string[]> {
     for (const file of files) {
         const cache = app.metadataCache.getFileCache(file);
 
-        // 1. Inline tags
-        if (cache && cache.tags) {
+        // Inline tags
+        if (cache?.tags) {
             for (const t of cache.tags) {
                 const tag = t.tag.replace(/^#/, "");
                 if (tag) addSegmentsToSet(tagSet, tag);
             }
         }
 
-        // 2. YAML frontmatter tags
-        if (cache && cache.frontmatter && cache.frontmatter.tags) {
-            const yamlTags = cache.frontmatter.tags;
-            if (Array.isArray(yamlTags)) {
-                yamlTags.forEach(tag => {
-                    if (typeof tag === "string") addSegmentsToSet(tagSet, tag.replace(/^#/, ""));
-                });
-            } else if (typeof yamlTags === "string") {
-                yamlTags.split(/[, ]/).forEach(tag => {
-                    tag = tag.trim();
-                    if (tag) addSegmentsToSet(tagSet, tag.replace(/^#/, ""));
-                });
-            }
+        // YAML frontmatter tags
+        if (cache?.frontmatter) {
+            extractYamlTags(cache.frontmatter.tags).forEach(tag => {
+                if (tag) addSegmentsToSet(tagSet, tag.replace(/^#/, ""));
+            });
         }
     }
 
