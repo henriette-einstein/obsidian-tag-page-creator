@@ -1,5 +1,7 @@
-import { App, Notice, Plugin, TFile, TFolder, PluginSettingTab, Setting, moment } from "obsidian";
+import { App, Notice, Menu, Plugin, TFile, normalizePath, PluginSettingTab, Setting, moment } from "obsidian";
 import { getCaseSensitiveDuplicateTags, getSegmentNormalizedTagMap, getAllTags } from "./tag-utils";
+import { getAliases, getFrontmatterAndBody, updateCodeBlock } from "./utils";
+import * as yaml from "js-yaml";
 
 
 interface TagPageCreatorSettings {
@@ -9,6 +11,8 @@ interface TagPageCreatorSettings {
 const DEFAULT_SETTINGS: TagPageCreatorSettings = {
     directory: "Tags"
 };
+
+
 
 export default class TagPageCreatorPlugin extends Plugin {
     settings: TagPageCreatorSettings;
@@ -29,7 +33,6 @@ export default class TagPageCreatorPlugin extends Plugin {
                 await normalizeTagSegmentsToLowercase(this.app);
             }
         });
-
         this.addSettingTab(new TagPageCreatorSettingTab(this.app, this));
     }
 
@@ -41,18 +44,25 @@ export default class TagPageCreatorPlugin extends Plugin {
         const created: string[] = [];
 
         for (const tag of tags) {
-            const cleanedTag = tag.replace(/\//g, '-');
+            const cleanedTag = tag.replace(/\//g, ' ').toLowerCase().trim();
+            // always generate lowercase files
             const fileName = `${dir}/Tag ${cleanedTag}.md`;
             const file = this.app.vault.getAbstractFileByPath(fileName);
             if (!file) {
-                const content = this.buildContent(tag);
                 try {
-                    await this.app.vault.create(fileName, content);
+                    await createTagPage(this.app, fileName, tag);
                 } catch (error) {
                     new Notice(`Error creating tag page for "${tag}": ${error}`);
                     continue;
                 }
                 created.push(fileName);
+            } else {
+                try {
+                    await addTagIfNeeded(this.app, file as TFile, tag);
+                } catch (error) {
+                    new Notice(`Error updating tag page for "${tag}": ${error}`);
+                    continue;
+                }
             }
         }
 
@@ -71,28 +81,6 @@ export default class TagPageCreatorPlugin extends Plugin {
         }
     }
 
-
-
-    buildContent(tag: string): string {
-        const today = moment().format("YYYY-MM-DD");
-        return `---
-aliases: ["#${tag}"]
-created: ${today}
----
-
-## Tag ${tag}
-
-\`\`\`base
-filters:
-\tand:
-\t\t- file.hasTag("${tag}")
-views:
-\t- type: table
-\t  name: Alle Notizen
-\`\`\`
-`;
-    }
-
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     }
@@ -102,6 +90,49 @@ views:
     }
 
 }
+
+
+async function createTagPage(app: App, fileName: string, tag: string) {
+    const today = moment().format("YYYY-MM-DD");
+    const content = `---
+aliases: ["#${tag}"]
+created: ${today}
+---
+
+## Tag ${tag}
+
+\`\`\`base
+filters:
+\tor:
+\t\t- file.hasTag("${tag}")
+views:
+\t- type: table
+\t  name: Alle Notizen
+\`\`\`
+`;
+    await this.app.vault.create(fileName, content);
+}
+
+async function addTagIfNeeded(app: App, file: TFile, tag: string) {
+    let content = await app.vault.read(file);
+    const { frontmatter, body } = getFrontmatterAndBody(content);
+    let aliases = getAliases(frontmatter);
+    const normalizedTag = "#" + tag;
+    if (!aliases.includes(normalizedTag)) {
+        aliases.push(normalizedTag);
+        frontmatter.aliases = aliases.length === 1 ? aliases[0] : aliases;
+        // Collect all tag variants (without #)
+        const tagVariants = Array.from(new Set(
+            aliases
+                .map(a => a.startsWith("#") ? a.slice(1) : a)
+        ));
+        const newBody = updateCodeBlock(body, tagVariants);
+        const fm = yaml.dump(frontmatter, { noRefs: true }).trim();
+        const newContent = `---\n${fm}\n---\n${newBody.replace(/^\n+/, "")}`;
+        app.vault.modify(file, newContent)
+    }
+}
+
 
 async function normalizeTagSegmentsToLowercase(app: App) {
     const duplicateTagGroups = await getCaseSensitiveDuplicateTags(app);
@@ -149,6 +180,64 @@ async function normalizeTagSegmentsToLowercase(app: App) {
     }
     new Notice("Tag segments normalized to lowercase.");
 }
+
+/**
+ * Replaces (or updates) all file.hasTag(...) filter lines in all ```base code blocks,
+ * adding all tagVariants (and not duplicating).
+ */
+function replaceBaseFilters(body: string, tagVariants: string[]): string {
+    return body.replace(
+        /```base([\s\S]*?)```/g,
+        (match, code) => {
+            const lines = code.split("\n");
+            const newLines: string[] = [];
+            let inOrBlock = false;
+            let foundFilters = false;
+            let orIndent = "";
+            let tagsInBlock = new Set<string>();
+            for (let line of lines) {
+                if (line.trim().startsWith("filters:")) {
+                    foundFilters = true;
+                    newLines.push(line);
+                    continue;
+                }
+                if (foundFilters && line.includes("or:")) {
+                    inOrBlock = true;
+                    orIndent = line.match(/^(\s*)/)?.[1] ?? "";
+                    newLines.push(line);
+                    continue;
+                }
+                if (inOrBlock && line.includes('file.hasTag(')) {
+                    const tagMatch = line.match(/file\.hasTag$begin:math:text$"([^"]+)"$end:math:text$/);
+                    if (tagMatch) tagsInBlock.add(tagMatch[1]);
+                    continue; // Don't add old tag line here
+                }
+                if (inOrBlock && !line.match(/^\s*-\s*file\.hasTag/)) {
+                    inOrBlock = false;
+                    for (const t of tagVariants) {
+                        if (!tagsInBlock.has(t)) tagsInBlock.add(t);
+                    }
+                    for (const t of Array.from(tagsInBlock)) {
+                        newLines.push(`${orIndent}\t\t- file.hasTag("${t}")`);
+                    }
+                }
+                newLines.push(line);
+            }
+            // If still inside the or block at the end, add tags
+            if (inOrBlock) {
+                for (const t of tagVariants) {
+                    if (!tagsInBlock.has(t)) tagsInBlock.add(t);
+                }
+                for (const t of Array.from(tagsInBlock)) {
+                    newLines.push(`${orIndent}\t\t- file.hasTag("${t}")`);
+                }
+            }
+            const uniqueLines = Array.from(new Set(newLines));
+            return "```base\n" + uniqueLines.join("\n") + "\n```";
+        }
+    );
+}
+
 
 class TagPageCreatorSettingTab extends PluginSettingTab {
     plugin: TagPageCreatorPlugin;
