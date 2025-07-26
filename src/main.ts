@@ -129,7 +129,7 @@ async function addTagIfNeeded(app: App, file: TFile, tag: string) {
         const newBody = updateCodeBlock(body, tagVariants);
         const fm = yaml.dump(frontmatter, { noRefs: true }).trim();
         const newContent = `---\n${fm}\n---\n${newBody.replace(/^\n+/, "")}`;
-        app.vault.modify(file, newContent)
+        await app.vault.modify(file, newContent)
     }
 }
 
