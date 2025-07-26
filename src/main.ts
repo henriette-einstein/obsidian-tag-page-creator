@@ -47,6 +47,7 @@ export default class TagPageCreatorPlugin extends Plugin {
             const cleanedTag = tag.replace(/\//g, ' ').toLowerCase().trim();
             // always generate lowercase files
             const fileName = `${dir}/Tag ${cleanedTag}.md`;
+            console.log(`Furzing tag page for "${tag}" at ${fileName}`);
             const file = this.app.vault.getAbstractFileByPath(fileName);
             if (!file) {
                 try {
